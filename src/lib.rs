@@ -238,6 +238,9 @@ impl StreamDeck {
 
                     0x3 => Ok(read_encoder_input(&self.kind, &data)?),
 
+                    // The Galleon acknowledges each software mode keep-alive with an input report
+                    0x27 if self.kind == Kind::Galleon100Sd => Ok(StreamDeckInput::NoData),
+
                     _ => Err(StreamDeckError::BadData),
                 }
             }
