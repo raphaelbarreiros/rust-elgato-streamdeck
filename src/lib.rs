@@ -211,7 +211,7 @@ impl StreamDeck {
 
             _ => {
                 let bytes = get_feature_report(&self.device, 0x05, 32)?;
-                Ok(extract_str(&bytes[6..])?)
+                Ok(extract_str(&bytes[6..])?.replace('\u{0001}', ""))
             }
         }
     }
