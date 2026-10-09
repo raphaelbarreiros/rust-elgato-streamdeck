@@ -106,4 +106,65 @@ impl ImageRect {
     pub fn from_image_async(image: DynamicImage) -> Result<ImageRect, StreamDeckError> {
         tokio::task::block_in_place(move || ImageRect::from_image(image))
     }
+
+    /// Converts image to image rect in the JPEG flavour the device's screen can decode.
+    /// The Galleon 100 SD's screen shows 4:4:4 JPEGs as diagonal stripes, so its images use
+    /// 4:2:0 chroma subsampling. Other devices get the same output as [ImageRect::from_image].
+    pub fn from_image_for_kind(kind: Kind, image: DynamicImage) -> Result<ImageRect, StreamDeckError> {
+        if kind != Kind::Galleon100Sd {
+            return ImageRect::from_image(image);
+        }
+
+        let image = image.into_rgb8();
+        let (image_w, image_h) = image.dimensions();
+
+        let mut buf = Vec::new();
+        let mut encoder = jpeg_encoder::Encoder::new(&mut buf, 90);
+        encoder.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_2_0);
+        encoder
+            .encode(image.as_raw(), image_w as u16, image_h as u16, jpeg_encoder::ColorType::Rgb)
+            .map_err(|e| ImageError::Encoding(image::error::EncodingError::new(image::ImageFormat::Jpeg.into(), e)))?;
+
+        Ok(ImageRect {
+            w: image_w as u16,
+            h: image_h as u16,
+            data: buf,
+        })
+    }
+
+    /// Converts image to image rect for the device, can be safely ran inside [multi_thread](tokio::runtime::Builder::new_multi_thread) runtime
+    #[cfg(feature = "async")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
+    pub fn from_image_for_kind_async(kind: Kind, image: DynamicImage) -> Result<ImageRect, StreamDeckError> {
+        tokio::task::block_in_place(move || ImageRect::from_image_for_kind(kind, image))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Horizontal and vertical sampling factors of the luma component in a baseline JPEG
+    fn luma_sampling(jpeg: &[u8]) -> (u8, u8) {
+        let sof = jpeg.windows(2).position(|w| w == [0xff, 0xc0]).expect("baseline SOF0 marker");
+        let factors = jpeg[sof + 11];
+        (factors >> 4, factors & 0x0f)
+    }
+
+    #[test]
+    fn galleon_screen_images_use_420_subsampling() {
+        let image = DynamicImage::new_rgb8(360, 384);
+        let rect = ImageRect::from_image_for_kind(Kind::Galleon100Sd, image).unwrap();
+
+        assert_eq!((rect.w, rect.h), (360, 384));
+        assert_eq!(luma_sampling(&rect.data), (2, 2));
+    }
+
+    #[test]
+    fn other_devices_keep_the_existing_encoding() {
+        let image = DynamicImage::new_rgb8(200, 100);
+        let rect = ImageRect::from_image_for_kind(Kind::Plus, image.clone()).unwrap();
+
+        assert_eq!(rect.data, ImageRect::from_image(image).unwrap().data);
+    }
 }

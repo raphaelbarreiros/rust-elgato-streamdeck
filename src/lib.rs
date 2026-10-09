@@ -211,7 +211,7 @@ impl StreamDeck {
 
             _ => {
                 let bytes = get_feature_report(&self.device, 0x05, 32)?;
-                Ok(extract_str(&bytes[6..])?)
+                Ok(extract_str(&bytes[6..])?.replace('\u{0001}', ""))
             }
         }
     }
@@ -237,6 +237,9 @@ impl StreamDeck {
                     0x2 => Ok(read_lcd_input(&data)?),
 
                     0x3 => Ok(read_encoder_input(&self.kind, &data)?),
+
+                    // The Galleon acknowledges each software mode keep-alive with an input report
+                    0x27 if self.kind == Kind::Galleon100Sd => Ok(StreamDeckInput::NoData),
 
                     _ => Err(StreamDeckError::BadData),
                 }
